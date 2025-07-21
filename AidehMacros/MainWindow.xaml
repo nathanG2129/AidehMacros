@@ -3,13 +3,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:ui="http://schemas.modernwpf.com/2019"
         xmlns:local="clr-namespace:AidehMacros"
         mc:Ignorable="d"
         Title="AidehMacros - Magic Remote Control Keyboard" 
         Height="700" Width="1000"
-        MinHeight="600" MinWidth="800"
-        ui:WindowHelper.UseModernWindowStyle="True">
+        MinHeight="600" MinWidth="800">
      
     <Grid>
         <Grid.RowDefinitions>
@@ -40,14 +38,14 @@
         <TabControl Grid.Row="1" x:Name="MainTabControl" Margin="20">
             
             <!-- Setup Tab -->
-            <TabItem Header="🔧 Setup">
+            <TabItem Header="Setup">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="20">
                         
                         <!-- Keyboard Selection -->
                         <GroupBox Header="1. Choose Your Macro Keyboard" Margin="0,0,0,20">
                             <StackPanel Margin="10">
-                                <TextBlock Text="Select which keyboard should act as your macro remote control. Your main keyboard will work normally." 
+                                <TextBlock Text="Select which keyboard should act as your macro remote control." 
                                          Foreground="Gray" TextWrapping="Wrap" Margin="0,0,0,10"/>
                                 
                                 <Grid Margin="0,10,0,0">
@@ -60,7 +58,7 @@
                                             DisplayMemberPath="Name" 
                                             SelectionChanged="KeyboardComboBox_SelectionChanged"/>
                                     
-                                    <Button Grid.Column="1" Content="🔄 Refresh" Margin="10,0,0,0" 
+                                    <Button Grid.Column="1" Content="Refresh" Margin="10,0,0,0" 
                                           Click="RefreshKeyboards_Click"/>
                                 </Grid>
                                 
@@ -87,7 +85,7 @@
             </TabItem>
             
             <!-- Actions Tab -->
-            <TabItem Header="⚡ Actions">
+            <TabItem Header="Actions">
                 <Grid Margin="20">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -115,15 +113,15 @@
                     </ListView>
                     
                     <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-                        <Button Content="+ New Action" Click="NewAction_Click" Margin="0,0,10,0"/>
-                        <Button Content="✏️ Edit" Click="EditAction_Click" IsEnabled="False" x:Name="EditActionButton" Margin="0,0,10,0"/>
-                        <Button Content="🗑️ Delete" Click="DeleteAction_Click" IsEnabled="False" x:Name="DeleteActionButton"/>
+                        <Button Content="New Action" Click="NewAction_Click" Margin="0,0,10,0"/>
+                        <Button Content="Edit" Click="EditAction_Click" IsEnabled="False" x:Name="EditActionButton" Margin="0,0,10,0"/>
+                        <Button Content="Delete" Click="DeleteAction_Click" IsEnabled="False" x:Name="DeleteActionButton"/>
                     </StackPanel>
                 </Grid>
             </TabItem>
             
             <!-- Mappings Tab -->
-            <TabItem Header="🎯 Mappings">
+            <TabItem Header="Mappings">
                 <Grid Margin="20">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -151,9 +149,9 @@
                     </ListView>
                     
                     <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-                        <Button Content="+ New Mapping" Click="NewMapping_Click" Margin="0,0,10,0"/>
-                        <Button Content="✏️ Edit" Click="EditMapping_Click" IsEnabled="False" x:Name="EditMappingButton" Margin="0,0,10,0"/>
-                        <Button Content="🗑️ Delete" Click="DeleteMapping_Click" IsEnabled="False" x:Name="DeleteMappingButton"/>
+                        <Button Content="New Mapping" Click="NewMapping_Click" Margin="0,0,10,0"/>
+                        <Button Content="Edit" Click="EditMapping_Click" IsEnabled="False" x:Name="EditMappingButton" Margin="0,0,10,0"/>
+                        <Button Content="Delete" Click="DeleteMapping_Click" IsEnabled="False" x:Name="DeleteMappingButton"/>
                     </StackPanel>
                 </Grid>
             </TabItem>

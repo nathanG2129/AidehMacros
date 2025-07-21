@@ -7,42 +7,82 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using AidehMacros.Models;
 using AidehMacros.Services;
-using ModernWpf.Controls;
+
 
 namespace AidehMacros
 {
     public partial class MainWindow : Window
     {
-        private readonly KeyboardDeviceService _keyboardService;
-        private readonly ConfigurationService _configService;
-        private readonly MacroExecutionService _executionService;
-        private readonly LowLevelKeyboardHook _keyboardHook;
+        private readonly KeyboardDeviceService _keyboardService = null!;
+        private readonly ConfigurationService _configService = null!;
+        private readonly MacroExecutionService _executionService = null!;
+        private readonly LowLevelKeyboardHook _keyboardHook = null!;
         
         private Configuration _currentConfig = null!;
-        private List<Models.KeyboardDevice> _availableKeyboards;
-        private ObservableCollection<MacroAction> _actions;
-        private ObservableCollection<MacroMapping> _mappings;
+        private List<Models.KeyboardDevice> _availableKeyboards = null!;
+        private ObservableCollection<MacroAction> _actions = null!;
+        private ObservableCollection<MacroMapping> _mappings = null!;
         
         public MainWindow()
         {
-            InitializeComponent();
-            
-            _keyboardService = new KeyboardDeviceService();
-            _configService = new ConfigurationService();
-            _executionService = new MacroExecutionService();
-            _keyboardHook = new LowLevelKeyboardHook();
-            
-            _availableKeyboards = new List<Models.KeyboardDevice>();
-            _actions = new ObservableCollection<MacroAction>();
-            _mappings = new ObservableCollection<MacroMapping>();
-            
-            InitializeApplication();
+            try
+            {
+                System.Diagnostics.Debug.WriteLine("MainWindow constructor started");
+                InitializeComponent();
+                System.Diagnostics.Debug.WriteLine("InitializeComponent completed");
+                
+                System.Diagnostics.Debug.WriteLine("Creating services...");
+                System.Diagnostics.Debug.WriteLine("About to create KeyboardDeviceService...");
+                _keyboardService = new KeyboardDeviceService();
+                System.Diagnostics.Debug.WriteLine("KeyboardDeviceService created");
+                
+                System.Diagnostics.Debug.WriteLine("About to create ConfigurationService...");
+                _configService = new ConfigurationService();
+                System.Diagnostics.Debug.WriteLine("ConfigurationService created");
+                
+                System.Diagnostics.Debug.WriteLine("About to create MacroExecutionService...");
+                _executionService = new MacroExecutionService();
+                System.Diagnostics.Debug.WriteLine("MacroExecutionService created");
+                
+                System.Diagnostics.Debug.WriteLine("About to create LowLevelKeyboardHook...");
+                _keyboardHook = new LowLevelKeyboardHook();
+                System.Diagnostics.Debug.WriteLine("LowLevelKeyboardHook created");
+                
+                System.Diagnostics.Debug.WriteLine("Creating collections...");
+                _availableKeyboards = new List<Models.KeyboardDevice>();
+                _actions = new ObservableCollection<MacroAction>();
+                _mappings = new ObservableCollection<MacroMapping>();
+                System.Diagnostics.Debug.WriteLine("Collections created");
+                
+                System.Diagnostics.Debug.WriteLine("About to call InitializeApplication");
+                InitializeApplication();
+                System.Diagnostics.Debug.WriteLine("InitializeApplication completed");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Critical error in MainWindow constructor: {ex.Message}");
+                
+                // Ensure minimum initialization
+                _currentConfig = new Services.Configuration();
+                _availableKeyboards = new List<Models.KeyboardDevice>();
+                _actions = new ObservableCollection<MacroAction>();
+                _mappings = new ObservableCollection<MacroMapping>();
+                
+                // Try to show the error to the user
+                System.Windows.MessageBox.Show($"Application failed to initialize properly: {ex.Message}", 
+                    "Initialization Error", 
+                    System.Windows.MessageBoxButton.OK, 
+                    System.Windows.MessageBoxImage.Warning);
+            }
         }
         
         private void InitializeApplication()
         {
-            // Load configuration
-            _currentConfig = _configService.LoadConfiguration();
+            try
+            {
+                // Load configuration
+                _currentConfig = _configService.LoadConfiguration();
+                System.Diagnostics.Debug.WriteLine($"Configuration loaded: {_currentConfig != null}");
             
             // Setup data bindings
             ActionsListView.ItemsSource = _actions;
@@ -52,16 +92,39 @@ namespace AidehMacros
             LoadActionsFromConfig();
             LoadMappingsFromConfig();
             
-            // Setup keyboard hook
-            _keyboardHook.KeyDown += OnKeyboardHookKeyDown;
-            _keyboardHook.StartHook();
+                            // Setup keyboard hook
+                _keyboardHook.KeyDown += OnKeyboardHookKeyDown;
+                try
+                {
+                    _keyboardHook.StartHook();
+                    System.Diagnostics.Debug.WriteLine("Keyboard hook started successfully");
+                }
+                catch (Exception hookEx)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to start keyboard hook: {hookEx.Message}");
+                    // Continue without the hook for now
+                }
             
             // Load keyboards
             RefreshKeyboards();
             
-            // Set initial state
-            EnabledToggle.IsChecked = _currentConfig.IsEnabled;
-            UpdateStatus("Application loaded successfully");
+                // Set initial state
+                EnabledToggle.IsChecked = _currentConfig?.IsEnabled ?? true;
+                UpdateStatus("Application loaded successfully");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error in InitializeApplication: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+                
+                // Ensure we have a valid config even if initialization fails
+                if (_currentConfig == null)
+                {
+                    _currentConfig = new Services.Configuration();
+                }
+                
+                UpdateStatus($"Error during initialization: {ex.Message}");
+            }
         }
         
         private void LoadActionsFromConfig()
@@ -142,6 +205,8 @@ namespace AidehMacros
         // Event Handlers
         private void EnabledToggle_Checked(object sender, RoutedEventArgs e)
         {
+            if (_currentConfig == null || _configService == null) return; // Skip during initialization
+            
             _currentConfig.IsEnabled = true;
             _configService.SaveConfiguration(_currentConfig);
             UpdateStatus("Macro system enabled");
@@ -149,6 +214,8 @@ namespace AidehMacros
         
         private void EnabledToggle_Unchecked(object sender, RoutedEventArgs e)
         {
+            if (_currentConfig == null || _configService == null) return; // Skip during initialization
+            
             _currentConfig.IsEnabled = false;
             _configService.SaveConfiguration(_currentConfig);
             UpdateStatus("Macro system disabled");
@@ -161,6 +228,8 @@ namespace AidehMacros
         
         private void KeyboardComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_currentConfig == null || _configService == null) return; // Skip during initialization
+            
             if (KeyboardComboBox.SelectedItem is Models.KeyboardDevice selectedKeyboard)
             {
                 _configService.SetMacroKeyboard(_currentConfig, selectedKeyboard.DeviceId);

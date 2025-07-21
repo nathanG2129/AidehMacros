@@ -1,16 +1,10 @@
 ﻿<Application x:Class="AidehMacros.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:ui="http://schemas.modernwpf.com/2019"
+
              xmlns:local="clr-namespace:AidehMacros"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <ui:ThemeResources>
-            <ui:ThemeResources.ThemeDictionaries>
-                <ui:ResourceDictionaryEx x:Key="Light" />
-                <ui:ResourceDictionaryEx x:Key="Dark" />
-                <ui:ResourceDictionaryEx x:Key="HighContrast" />
-            </ui:ThemeResources.ThemeDictionaries>
-        </ui:ThemeResources>
+        <!-- Theme resources removed for testing -->
     </Application.Resources>
 </Application>
