@@ -1,0 +1,177 @@
+﻿<Window x:Class="AidehMacros.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:ui="http://schemas.modernwpf.com/2019"
+        xmlns:local="clr-namespace:AidehMacros"
+        mc:Ignorable="d"
+        Title="AidehMacros - Magic Remote Control Keyboard" 
+        Height="700" Width="1000"
+        MinHeight="600" MinWidth="800"
+        ui:WindowHelper.UseModernWindowStyle="True">
+     
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <!-- Header -->
+        <Grid Grid.Row="0" Background="LightGray" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            
+            <StackPanel Grid.Column="0" Margin="20,15">
+                <TextBlock Text="AidehMacros" FontSize="24" FontWeight="Bold"/>
+                <TextBlock Text="Transform any keyboard into your streaming remote control" FontSize="14" Foreground="Gray"/>
+            </StackPanel>
+            
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="20,15">
+                <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                <CheckBox x:Name="EnabledToggle" Content="Enabled" IsChecked="True" Checked="EnabledToggle_Checked" Unchecked="EnabledToggle_Unchecked"/>
+            </StackPanel>
+        </Grid>
+        
+        <!-- Main Content -->
+        <TabControl Grid.Row="1" x:Name="MainTabControl" Margin="20">
+            
+            <!-- Setup Tab -->
+            <TabItem Header="🔧 Setup">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="20">
+                        
+                        <!-- Keyboard Selection -->
+                        <GroupBox Header="1. Choose Your Macro Keyboard" Margin="0,0,0,20">
+                            <StackPanel Margin="10">
+                                <TextBlock Text="Select which keyboard should act as your macro remote control. Your main keyboard will work normally." 
+                                         Foreground="Gray" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    
+                                    <ComboBox x:Name="KeyboardComboBox" Grid.Column="0" 
+                                            DisplayMemberPath="Name" 
+                                            SelectionChanged="KeyboardComboBox_SelectionChanged"/>
+                                    
+                                    <Button Grid.Column="1" Content="🔄 Refresh" Margin="10,0,0,0" 
+                                          Click="RefreshKeyboards_Click"/>
+                                </Grid>
+                                
+                                <TextBlock x:Name="SelectedKeyboardInfo" Margin="0,5,0,0" Foreground="Gray"/>
+                            </StackPanel>
+                        </GroupBox>
+                        
+                        <!-- Quick Test -->
+                        <GroupBox Header="2. Test Your Setup">
+                            <StackPanel Margin="10">
+                                <TextBlock Text="Press any key on your selected macro keyboard to test detection." 
+                                         Foreground="Gray" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                
+                                <Border Background="LightBlue" BorderBrush="Gray" BorderThickness="1"
+                                      Padding="15" Margin="0,10,0,0">
+                                    <TextBlock x:Name="TestKeyDisplay" Text="Waiting for key press..." 
+                                             FontFamily="Consolas" FontSize="16" HorizontalAlignment="Center"/>
+                                </Border>
+                            </StackPanel>
+                        </GroupBox>
+                        
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            
+            <!-- Actions Tab -->
+            <TabItem Header="⚡ Actions">
+                <Grid Margin="20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    
+                    <StackPanel Grid.Row="0" Margin="0,0,0,20">
+                        <TextBlock Text="Macro Actions" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Text="Create actions that will be triggered by your macro keyboard keys." 
+                                 Foreground="Gray" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    
+                    <ListView Grid.Row="1" x:Name="ActionsListView" 
+                            SelectionMode="Single" 
+                            SelectionChanged="ActionsListView_SelectionChanged">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Type" DisplayMemberBinding="{Binding Type}" Width="120"/>
+                                <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="200"/>
+                                <GridViewColumn Header="Data" DisplayMemberBinding="{Binding Data}" Width="300"/>
+                                <GridViewColumn Header="Enabled" DisplayMemberBinding="{Binding IsEnabled}" Width="80"/>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                    
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                        <Button Content="+ New Action" Click="NewAction_Click" Margin="0,0,10,0"/>
+                        <Button Content="✏️ Edit" Click="EditAction_Click" IsEnabled="False" x:Name="EditActionButton" Margin="0,0,10,0"/>
+                        <Button Content="🗑️ Delete" Click="DeleteAction_Click" IsEnabled="False" x:Name="DeleteActionButton"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+            
+            <!-- Mappings Tab -->
+            <TabItem Header="🎯 Mappings">
+                <Grid Margin="20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    
+                    <StackPanel Grid.Row="0" Margin="0,0,0,20">
+                        <TextBlock Text="Key Mappings" FontSize="18" FontWeight="SemiBold"/>
+                        <TextBlock Text="Map keys on your macro keyboard to specific actions." 
+                                 Foreground="Gray" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    
+                    <ListView Grid.Row="1" x:Name="MappingsListView" 
+                            SelectionMode="Single" 
+                            SelectionChanged="MappingsListView_SelectionChanged">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Key" DisplayMemberBinding="{Binding TriggerKey}" Width="100"/>
+                                <GridViewColumn Header="Action" DisplayMemberBinding="{Binding Action.Name}" Width="200"/>
+                                <GridViewColumn Header="Details" DisplayMemberBinding="{Binding Action.Data}" Width="300"/>
+                                <GridViewColumn Header="Enabled" DisplayMemberBinding="{Binding IsEnabled}" Width="80"/>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                    
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                        <Button Content="+ New Mapping" Click="NewMapping_Click" Margin="0,0,10,0"/>
+                        <Button Content="✏️ Edit" Click="EditMapping_Click" IsEnabled="False" x:Name="EditMappingButton" Margin="0,0,10,0"/>
+                        <Button Content="🗑️ Delete" Click="DeleteMapping_Click" IsEnabled="False" x:Name="DeleteMappingButton"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+            
+        </TabControl>
+        
+        <!-- Footer -->
+        <Border Grid.Row="2" Background="LightGray" Margin="0,10,0,0">
+            <Grid Margin="20,10">
+                <TextBlock x:Name="FooterText" Text="Ready to transform your keyboard!" 
+                         Foreground="Gray" VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <TextBlock Text="💡 " FontSize="16" VerticalAlignment="Center"/>
+                    <TextBlock Text="Tip: Start with simple shortcuts like F1-F12 keys for easy access" 
+                             Foreground="Gray" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+        
+    </Grid>
+ </Window>
