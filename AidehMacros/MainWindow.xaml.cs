@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -13,15 +14,15 @@ namespace AidehMacros
 {
     public partial class MainWindow : Window
     {
-        private readonly KeyboardDeviceService _keyboardService = null!;
         private readonly ConfigurationService _configService = null!;
         private readonly MacroExecutionService _executionService = null!;
-        private readonly LowLevelKeyboardHook _keyboardHook = null!;
+        private readonly RawInputKeyboardHook _keyboardHook = null!;
         
         private Configuration _currentConfig = null!;
-        private List<Models.KeyboardDevice> _availableKeyboards = null!;
+        private string? _detectedKeyboardId = null;
         private ObservableCollection<MacroAction> _actions = null!;
         private ObservableCollection<MacroMapping> _mappings = null!;
+        private System.Threading.CancellationTokenSource? _testDisplayResetToken;
         
         public MainWindow()
         {
@@ -32,9 +33,6 @@ namespace AidehMacros
                 System.Diagnostics.Debug.WriteLine("InitializeComponent completed");
                 
                 System.Diagnostics.Debug.WriteLine("Creating services...");
-                System.Diagnostics.Debug.WriteLine("About to create KeyboardDeviceService...");
-                _keyboardService = new KeyboardDeviceService();
-                System.Diagnostics.Debug.WriteLine("KeyboardDeviceService created");
                 
                 System.Diagnostics.Debug.WriteLine("About to create ConfigurationService...");
                 _configService = new ConfigurationService();
@@ -44,12 +42,11 @@ namespace AidehMacros
                 _executionService = new MacroExecutionService();
                 System.Diagnostics.Debug.WriteLine("MacroExecutionService created");
                 
-                System.Diagnostics.Debug.WriteLine("About to create LowLevelKeyboardHook...");
-                _keyboardHook = new LowLevelKeyboardHook();
-                System.Diagnostics.Debug.WriteLine("LowLevelKeyboardHook created");
+                System.Diagnostics.Debug.WriteLine("About to create RawInputKeyboardHook...");
+                _keyboardHook = new RawInputKeyboardHook();
+                System.Diagnostics.Debug.WriteLine("RawInputKeyboardHook created");
                 
                 System.Diagnostics.Debug.WriteLine("Creating collections...");
-                _availableKeyboards = new List<Models.KeyboardDevice>();
                 _actions = new ObservableCollection<MacroAction>();
                 _mappings = new ObservableCollection<MacroMapping>();
                 System.Diagnostics.Debug.WriteLine("Collections created");
@@ -64,7 +61,6 @@ namespace AidehMacros
                 
                 // Ensure minimum initialization
                 _currentConfig = new Services.Configuration();
-                _availableKeyboards = new List<Models.KeyboardDevice>();
                 _actions = new ObservableCollection<MacroAction>();
                 _mappings = new ObservableCollection<MacroMapping>();
                 
@@ -76,6 +72,32 @@ namespace AidehMacros
             }
         }
         
+        private void Window_Loaded(object sender, RoutedEventArgs e)
+        {
+            // Initialize the keyboard hook when the window is loaded
+            var windowHandle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            System.Diagnostics.Debug.WriteLine($"MainWindow.Window_Loaded: Initializing keyboard hook with handle {windowHandle:X8}");
+            
+            if (_keyboardHook.Initialize(windowHandle))
+            {
+                _keyboardHook.KeyDown += OnKeyboardHookKeyDown;
+                
+                // Set the target device if we have one
+                if (!string.IsNullOrEmpty(_detectedKeyboardId))
+                {
+                    _keyboardHook.SetTargetDevice(_detectedKeyboardId);
+                    System.Diagnostics.Debug.WriteLine($"MainWindow: Set target device to {_detectedKeyboardId}");
+                }
+                
+                System.Diagnostics.Debug.WriteLine("MainWindow: Raw Input keyboard hook started successfully");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("MainWindow: Failed to start keyboard hook");
+                UpdateStatus("Warning: Keyboard detection failed to initialize");
+            }
+        }
+        
         private void InitializeApplication()
         {
             try
@@ -84,33 +106,35 @@ namespace AidehMacros
                 _currentConfig = _configService.LoadConfiguration();
                 System.Diagnostics.Debug.WriteLine($"Configuration loaded: {_currentConfig != null}");
             
-            // Setup data bindings
-            ActionsListView.ItemsSource = _actions;
-            MappingsListView.ItemsSource = _mappings;
-            
-            // Load data from config
-            LoadActionsFromConfig();
-            LoadMappingsFromConfig();
-            
-                            // Setup keyboard hook
-                _keyboardHook.KeyDown += OnKeyboardHookKeyDown;
-                try
-                {
-                    _keyboardHook.StartHook();
-                    System.Diagnostics.Debug.WriteLine("Keyboard hook started successfully");
-                }
-                catch (Exception hookEx)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Failed to start keyboard hook: {hookEx.Message}");
-                    // Continue without the hook for now
-                }
-            
-            // Load keyboards
-            RefreshKeyboards();
-            
+                // Setup data bindings
+                ActionsListView.ItemsSource = _actions;
+                MappingsListView.ItemsSource = _mappings;
+                
+                // Load data from config
+                LoadActionsFromConfig();
+                LoadMappingsFromConfig();
+                
+                // Load the detected keyboard from config
+                _detectedKeyboardId = _currentConfig?.MacroKeyboardDeviceId;
+                
                 // Set initial state
                 EnabledToggle.IsChecked = _currentConfig?.IsEnabled ?? true;
-                UpdateStatus("Application loaded successfully");
+                
+                // Update UI based on whether we have a keyboard configured
+                if (string.IsNullOrEmpty(_detectedKeyboardId))
+                {
+                    KeyboardStatusText.Text = "No macro keyboard configured";
+                    TestKeyDisplay.Text = "No keyboard configured. Use 'Setup Macro Keyboard' first.";
+                    TestKeyDisplay.Background = System.Windows.Media.Brushes.LightGray;
+                    UpdateStatus("No macro keyboard configured. Use 'Setup Keyboard' to get started.");
+                }
+                else
+                {
+                    KeyboardStatusText.Text = $"Configured: {_detectedKeyboardId}";
+                    TestKeyDisplay.Text = "Waiting for key press from your macro keyboard...";
+                    TestKeyDisplay.Background = System.Windows.Media.Brushes.LightBlue;
+                    UpdateStatus($"Ready - Macro keyboard: {_detectedKeyboardId}");
+                }
             }
             catch (Exception ex)
             {
@@ -146,53 +170,127 @@ namespace AidehMacros
             }
         }
         
-        private void RefreshKeyboards()
+        private void SetupKeyboard()
         {
-            try
+            // Temporarily dispose the main window's hook to avoid conflicts
+            _keyboardHook?.Dispose();
+            System.Diagnostics.Debug.WriteLine("MainWindow.SetupKeyboard: Disposed main hook before detection");
+            
+            var dialog = new KeyboardDetectionDialog();
+            dialog.Owner = this;
+            
+            if (dialog.ShowDialog() == true && dialog.WasDetected && !string.IsNullOrEmpty(dialog.DetectedKeyboardId))
             {
-                _availableKeyboards = _keyboardService.GetConnectedKeyboards();
-                KeyboardComboBox.ItemsSource = _availableKeyboards;
+                _detectedKeyboardId = dialog.DetectedKeyboardId;
+                System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Detected keyboard ID: {_detectedKeyboardId}");
                 
-                // Select the previously configured keyboard if it exists
-                if (!string.IsNullOrEmpty(_currentConfig.MacroKeyboardDeviceId))
+                // Re-initialize the main window's keyboard hook
+                var windowHandle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                if (_keyboardHook.Initialize(windowHandle))
                 {
-                    var selectedKeyboard = _availableKeyboards.FirstOrDefault(k => k.DeviceId == _currentConfig.MacroKeyboardDeviceId);
-                    if (selectedKeyboard != null)
-                    {
-                        KeyboardComboBox.SelectedItem = selectedKeyboard;
-                    }
+                    _keyboardHook.KeyDown += OnKeyboardHookKeyDown;
+                    _keyboardHook.SetTargetDevice(_detectedKeyboardId);
+                    System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-initialized main hook with target device");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Failed to re-initialize main hook");
                 }
                 
-                UpdateStatus($"Found {_availableKeyboards.Count} keyboard(s)");
+                // Save to configuration
+                _configService.SetMacroKeyboard(_currentConfig, _detectedKeyboardId ?? string.Empty);
+                _configService.SaveConfiguration(_currentConfig);
+                System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Saved configuration");
+                
+                // Update UI
+                KeyboardStatusText.Text = $"Configured: {_detectedKeyboardId}";
+                UpdateStatus($"Macro keyboard configured: {_detectedKeyboardId} - Ready for testing!");
+                
+                // Clear the test display to show it's ready for new input
+                TestKeyDisplay.Text = "Keyboard configured! Press any key on your macro keyboard to test...";
+                TestKeyDisplay.Background = System.Windows.Media.Brushes.LightGreen;
+                
+                System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: UI updated, ready for testing");
             }
-            catch (Exception ex)
+            else
             {
-                UpdateStatus($"Error loading keyboards: {ex.Message}");
+                // If detection was cancelled, re-initialize the hook anyway
+                var windowHandle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                if (_keyboardHook.Initialize(windowHandle))
+                {
+                    _keyboardHook.KeyDown += OnKeyboardHookKeyDown;
+                    if (!string.IsNullOrEmpty(_detectedKeyboardId))
+                    {
+                        _keyboardHook.SetTargetDevice(_detectedKeyboardId);
+                    }
+                    System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-initialized main hook after cancelled detection");
+                }
             }
         }
         
-        private void OnKeyboardHookKeyDown(object? sender, KeyboardHookEventArgs e)
+        private void OnKeyboardHookKeyDown(object? sender, RawKeyboardEventArgs e)
         {
-            if (!_currentConfig.IsEnabled) return;
+            System.Diagnostics.Debug.WriteLine($"MainWindow.OnKeyboardHookKeyDown called: Key={e.Key}, Device={e.DeviceId}, IsTarget={e.IsFromTargetDevice}, Enabled={_currentConfig.IsEnabled}");
+            
+            if (!_currentConfig.IsEnabled) 
+            {
+                System.Diagnostics.Debug.WriteLine("MainWindow: Macro system disabled, ignoring key");
+                return;
+            }
+            
+            // Only process keys from our target keyboard
+            if (!e.IsFromTargetDevice) 
+            {
+                System.Diagnostics.Debug.WriteLine("MainWindow: Key not from target device, ignoring");
+                return;
+            }
+            
+            System.Diagnostics.Debug.WriteLine("MainWindow: Processing key from target device");
             
             Dispatcher.Invoke(() =>
             {
-                // Update test display
-                TestKeyDisplay.Text = $"Last key pressed: {e.Key} (VK: {e.VirtualKeyCode})";
+                // Cancel any pending reset operations
+                _testDisplayResetToken?.Cancel();
+                _testDisplayResetToken = new System.Threading.CancellationTokenSource();
+                
+                // Update test display with visual feedback
+                var keyName = e.Key.ToString();
+                TestKeyDisplay.Text = $"✅ Key Detected: {keyName} (VK: {e.VirtualKeyCode})";
+                TestKeyDisplay.Background = System.Windows.Media.Brushes.LightGreen;
                 
                 // Check if this key has a mapping
-                var keyName = e.Key.ToString();
                 var mapping = _currentConfig.GetMappingForKey(keyName);
                 
                 if (mapping?.Action != null)
                 {
                     // Execute the mapped action
                     _ = _executionService.ExecuteActionAsync(mapping.Action);
-                    UpdateStatus($"Executed: {mapping.Action.Name}");
+                    UpdateStatus($"✅ Key {keyName} pressed → Executed: {mapping.Action.Name}");
                     
-                    // Suppress the key if it's from our macro keyboard
-                    e.Handled = true;
+                    // Show mapping feedback immediately (no delay)
+                    TestKeyDisplay.Text = $"✅ Key Detected: {keyName}\n🎯 Mapped Action: {mapping.Action.Name}";
                 }
+                else
+                {
+                    UpdateStatus($"🔑 Key pressed: {keyName} (no mapping configured)");
+                    
+                    // Show no mapping feedback immediately (no delay)
+                    TestKeyDisplay.Text = $"✅ Key Detected: {keyName}\n⚠️ No action mapped to this key";
+                }
+                
+                // Reset test display after 3 seconds (with cancellation support)
+                var currentToken = _testDisplayResetToken.Token;
+                Task.Delay(3000, currentToken).ContinueWith(task =>
+                {
+                    if (!task.IsCanceled)
+                    {
+                        Dispatcher.Invoke(() =>
+                        {
+                            TestKeyDisplay.Text = "Waiting for key press from your macro keyboard...";
+                            TestKeyDisplay.Background = System.Windows.Media.Brushes.LightBlue;
+                        });
+                    }
+                }, TaskScheduler.Default);
             });
         }
         
@@ -221,21 +319,9 @@ namespace AidehMacros
             UpdateStatus("Macro system disabled");
         }
         
-        private void RefreshKeyboards_Click(object sender, RoutedEventArgs e)
+        private void SetupKeyboardButton_Click(object sender, RoutedEventArgs e)
         {
-            RefreshKeyboards();
-        }
-        
-        private void KeyboardComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_currentConfig == null || _configService == null) return; // Skip during initialization
-            
-            if (KeyboardComboBox.SelectedItem is Models.KeyboardDevice selectedKeyboard)
-            {
-                _configService.SetMacroKeyboard(_currentConfig, selectedKeyboard.DeviceId);
-                SelectedKeyboardInfo.Text = $"Selected: {selectedKeyboard.Name} (ID: {selectedKeyboard.DeviceId})";
-                UpdateStatus($"Macro keyboard set to: {selectedKeyboard.Name}");
-            }
+            SetupKeyboard();
         }
         
         private void ActionsListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -356,7 +442,9 @@ namespace AidehMacros
         
         protected override void OnClosed(EventArgs e)
         {
-            _keyboardHook.StopHook();
+            _testDisplayResetToken?.Cancel();
+            _testDisplayResetToken?.Dispose();
+            _keyboardHook?.Dispose();
             base.OnClosed(e);
         }
     }
