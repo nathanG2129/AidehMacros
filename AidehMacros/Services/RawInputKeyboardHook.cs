@@ -81,33 +81,20 @@ namespace AidehMacros.Services
         private readonly Dictionary<IntPtr, string> _deviceNames = new();
         private string? _targetDeviceId;
         private bool _isDetectionMode = false;
-        private bool _enableInputBlocking = false;
 
         #endregion
 
         #region Public Methods
 
-        public void SetInputBlocking(bool enabled)
-        {
-            _enableInputBlocking = enabled;
-            System.Diagnostics.Debug.WriteLine($"RawInputKeyboardHook: Input blocking set to {enabled}");
-            
-            // Re-register devices with updated flags if already initialized
-            if (_windowHandle != IntPtr.Zero)
-            {
-                RegisterDevices();
-            }
-        }
+
         
         private void RegisterDevices()
         {
             try
             {
+                // Only use RIDEV_INPUTSINK - do not use RIDEV_NOLEGACY
+                // RIDEV_NOLEGACY can interfere with Low-Level hooks receiving messages
                 uint flags = RIDEV_INPUTSINK;
-                if (_enableInputBlocking)
-                {
-                    flags |= RIDEV_NOLEGACY; // This blocks legacy keyboard messages
-                }
                 
                 var device = new RAWINPUTDEVICE
                 {

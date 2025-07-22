@@ -16,7 +16,8 @@ namespace AidehMacros
     {
         private readonly ConfigurationService _configService = null!;
         private readonly MacroExecutionService _executionService = null!;
-        private readonly RawInputKeyboardHook _rawInputHook = null!; // Primary hook for both detection and blocking
+        private readonly RawInputKeyboardHook _rawInputHook = null!; // Primary hook for device detection and action execution
+        private readonly LowLevelKeyboardHook _blockingHook = null!; // Secondary hook for input blocking only
         
         private Configuration _currentConfig = null!;
         private string? _detectedKeyboardId = null;
@@ -26,6 +27,8 @@ namespace AidehMacros
         
         // Device correlation tracking
         private readonly HashSet<string> _mappedKeys = new(); // Keys that should be blocked
+        private readonly Dictionary<string, DateTime> _recentMacroKeyPresses = new();
+        private readonly TimeSpan _keyCorrelationWindow = TimeSpan.FromMilliseconds(100); // Increased from 50ms to 100ms
         
         public MainWindow()
         {
@@ -48,6 +51,10 @@ namespace AidehMacros
                 System.Diagnostics.Debug.WriteLine("About to create RawInputKeyboardHook...");
                 _rawInputHook = new RawInputKeyboardHook();
                 System.Diagnostics.Debug.WriteLine("RawInputKeyboardHook created");
+                
+                System.Diagnostics.Debug.WriteLine("About to create LowLevelKeyboardHook for blocking...");
+                _blockingHook = new LowLevelKeyboardHook();
+                System.Diagnostics.Debug.WriteLine("LowLevelKeyboardHook created");
                 
                 System.Diagnostics.Debug.WriteLine("Creating collections...");
                 _actions = new ObservableCollection<MacroAction>();
@@ -77,7 +84,7 @@ namespace AidehMacros
         
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            // Initialize the raw input hook for device detection
+            // Initialize the raw input hook for device detection and action execution
             var windowHandle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
             System.Diagnostics.Debug.WriteLine($"MainWindow.Window_Loaded: Initializing raw input hook with handle {windowHandle:X8}");
             
@@ -89,8 +96,7 @@ namespace AidehMacros
                 if (!string.IsNullOrEmpty(_detectedKeyboardId))
                 {
                     _rawInputHook.SetTargetDevice(_detectedKeyboardId);
-                    _rawInputHook.SetInputBlocking(true); // Enable input blocking for mapped keys
-                    System.Diagnostics.Debug.WriteLine($"MainWindow: Set raw input target device to {_detectedKeyboardId} with input blocking enabled");
+                    System.Diagnostics.Debug.WriteLine($"MainWindow: Set raw input target device to {_detectedKeyboardId}");
                 }
                 
                 System.Diagnostics.Debug.WriteLine("MainWindow: Raw Input keyboard hook started successfully");
@@ -99,6 +105,12 @@ namespace AidehMacros
             {
                 System.Diagnostics.Debug.WriteLine("MainWindow: Failed to start raw input hook");
             }
+            
+            // Initialize the low-level hook for input blocking
+            System.Diagnostics.Debug.WriteLine("MainWindow: Starting low-level keyboard hook for input blocking");
+            _blockingHook.KeyDown += OnBlockingHookKeyDown;
+            _blockingHook.StartHook();
+            System.Diagnostics.Debug.WriteLine("MainWindow: Low-level keyboard hook started");
             
             UpdateStatus("Keyboard hooks initialized - ready for macro detection and blocking");
         }
@@ -182,7 +194,8 @@ namespace AidehMacros
         {
             // Temporarily dispose the main window's hooks to avoid conflicts
             _rawInputHook?.Dispose();
-            System.Diagnostics.Debug.WriteLine("MainWindow.SetupKeyboard: Stopped hooks before detection");
+            _blockingHook?.StopHook();
+            System.Diagnostics.Debug.WriteLine("MainWindow.SetupKeyboard: Stopped both hooks before detection");
             
             var dialog = new KeyboardDetectionDialog();
             dialog.Owner = this;
@@ -198,13 +211,16 @@ namespace AidehMacros
                 {
                     _rawInputHook.KeyDown += OnRawInputKeyDown;
                     _rawInputHook.SetTargetDevice(_detectedKeyboardId);
-                    _rawInputHook.SetInputBlocking(true); // Enable input blocking for mapped keys
-                    System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-initialized raw input hook with target device and input blocking enabled");
+                    System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-initialized raw input hook with target device");
                 }
                 else
                 {
                     System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Failed to re-initialize raw input hook");
                 }
+                
+                // Re-start the blocking hook
+                _blockingHook.StartHook();
+                System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-started blocking hook");
                 
                 // Save to configuration
                 _configService.SetMacroKeyboard(_currentConfig, _detectedKeyboardId ?? string.Empty);
@@ -231,10 +247,12 @@ namespace AidehMacros
                     if (!string.IsNullOrEmpty(_detectedKeyboardId))
                     {
                         _rawInputHook.SetTargetDevice(_detectedKeyboardId);
-                        _rawInputHook.SetInputBlocking(true); // Enable input blocking for mapped keys
                     }
                     System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-initialized raw input hook after cancelled detection");
                 }
+                
+                _blockingHook.StartHook();
+                System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-started blocking hook after cancelled detection");
             }
         }
         
@@ -256,6 +274,10 @@ namespace AidehMacros
                 }
                 
                 System.Diagnostics.Debug.WriteLine($"MainWindow: Processing key '{keyName}' from macro keyboard");
+                
+                // Mark this key for potential blocking by the Low-Level Hook
+                _recentMacroKeyPresses[keyName] = DateTime.Now;
+                System.Diagnostics.Debug.WriteLine($"MainWindow: Marked key '{keyName}' for blocking correlation at {DateTime.Now:HH:mm:ss.fff}");
                 
                 // Check if this key has a mapping and execute the action
                 var mapping = _currentConfig.GetMappingForKey(keyName);
@@ -287,8 +309,8 @@ namespace AidehMacros
                     
                     if (mapping?.Action != null)
                     {
-                        TestKeyDisplay.Text = $"✅ Key Detected: {keyName}\n🎯 Executed Action: {mapping.Action.Name}\n🚫 Input blocked for this device";
-                        UpdateStatus($"🎯 Key {keyName} → Executed: {mapping.Action.Name} (macro keyboard input blocked)");
+                        TestKeyDisplay.Text = $"✅ Key Detected: {keyName}\n🎯 Executed Action: {mapping.Action.Name}\n🚫 Input should be blocked";
+                        UpdateStatus($"🎯 Key {keyName} → Executed: {mapping.Action.Name} (input blocking in progress)");
                     }
                     else
                     {
@@ -314,6 +336,101 @@ namespace AidehMacros
             else
             {
                 System.Diagnostics.Debug.WriteLine($"MainWindow: Key '{keyName}' from non-target device {e.DeviceId}, ignoring");
+            }
+        }
+        
+        private async void OnBlockingHookKeyDown(object? sender, KeyboardHookEventArgs e)
+        {
+            System.Diagnostics.Debug.WriteLine($"MainWindow.OnBlockingHookKeyDown: Key={e.Key}, VK={e.VirtualKeyCode}, Enabled={_currentConfig.IsEnabled}");
+            
+            if (!_currentConfig.IsEnabled) 
+            {
+                System.Diagnostics.Debug.WriteLine("MainWindow: Macro system disabled, allowing key through");
+                return;
+            }
+            
+            var keyName = e.Key.ToString();
+            var now = DateTime.Now;
+            
+            // Check if this key was recently pressed on our macro keyboard
+            bool shouldBlock = false;
+            
+            if (_recentMacroKeyPresses.ContainsKey(keyName))
+            {
+                var pressTime = _recentMacroKeyPresses[keyName];
+                var timeDiff = now - pressTime;
+                
+                if (timeDiff <= _keyCorrelationWindow)
+                {
+                    shouldBlock = true;
+                    _recentMacroKeyPresses.Remove(keyName); // Consume the correlation
+                    System.Diagnostics.Debug.WriteLine($"MainWindow: Found immediate correlation for {keyName} (time diff: {timeDiff.TotalMilliseconds}ms)");
+                }
+            }
+            
+            // If no correlation found, wait briefly for delayed Raw Input message
+            // This handles the timing race condition where Hook arrives before Raw Input
+            if (!shouldBlock && _mappedKeys.Contains(keyName))
+            {
+                System.Diagnostics.Debug.WriteLine($"MainWindow: Key {keyName} is mapped but no correlation found, waiting for delayed Raw Input...");
+                
+                // Brief wait for potential delayed Raw Input message
+                await Task.Delay(15); // Small delay to allow Raw Input to catch up
+                
+                // Check again after waiting
+                if (_recentMacroKeyPresses.ContainsKey(keyName))
+                {
+                    var pressTime = _recentMacroKeyPresses[keyName];
+                    var timeDiff = DateTime.Now - pressTime;
+                    
+                    if (timeDiff <= _keyCorrelationWindow)
+                    {
+                        shouldBlock = true;
+                        _recentMacroKeyPresses.Remove(keyName);
+                        System.Diagnostics.Debug.WriteLine($"MainWindow: Found delayed correlation for {keyName} after waiting (time diff: {timeDiff.TotalMilliseconds}ms)");
+                    }
+                }
+            }
+            
+            if (shouldBlock)
+            {
+                // Check if this key has a mapping (double-check for safety)
+                var mapping = _currentConfig.GetMappingForKey(keyName);
+                
+                if (mapping?.Action != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"MainWindow: BLOCKING key {keyName} (correlated with macro keyboard press, mapped to '{mapping.Action.Name}')");
+                    e.Handled = true;
+                    
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        UpdateStatus($"🚫 Key {keyName} BLOCKED from macro keyboard → Action: {mapping.Action.Name}");
+                    });
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"MainWindow: Key {keyName} was pressed on macro keyboard but has no mapping, allowing through");
+                }
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"MainWindow: Key {keyName} not correlated with recent macro keyboard press, allowing through");
+            }
+            
+            // Clean up old correlation entries (do this less frequently to improve performance)
+            if (_recentMacroKeyPresses.Count > 10) // Only clean up when we have many entries
+            {
+                var cutoff = now - _keyCorrelationWindow;
+                var keysToRemove = _recentMacroKeyPresses.Where(kvp => kvp.Value < cutoff).Select(kvp => kvp.Key).ToList();
+                foreach (var key in keysToRemove)
+                {
+                    _recentMacroKeyPresses.Remove(key);
+                }
+                
+                if (keysToRemove.Count > 0)
+                {
+                    System.Diagnostics.Debug.WriteLine($"MainWindow: Cleaned up {keysToRemove.Count} old correlation entries");
+                }
             }
         }
         
@@ -470,6 +587,7 @@ namespace AidehMacros
         {
             _testDisplayResetToken?.Cancel();
             _testDisplayResetToken?.Dispose();
+            _blockingHook?.StopHook();
             _rawInputHook?.Dispose();
             base.OnClosed(e);
         }

@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Windows.Input;
@@ -22,6 +24,10 @@ namespace AidehMacros.Services
         private LowLevelKeyboardProc _proc = HookCallback;
         private IntPtr _hookID = IntPtr.Zero;
         private static LowLevelKeyboardHook? _instance;
+        
+        // Duplicate message detection
+        private static readonly Dictionary<string, DateTime> _lastHookMessage = new();
+        private static readonly TimeSpan _duplicateWindow = TimeSpan.FromMilliseconds(20);
         
         public LowLevelKeyboardHook()
         {
@@ -79,6 +85,19 @@ namespace AidehMacros.Services
                 {
                     var hookStruct = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
                     var key = KeyInterop.KeyFromVirtualKey((int)hookStruct.vkCode);
+                    var keyName = key.ToString();
+                    var now = DateTime.Now;
+                    
+                    // Check for duplicate messages (research showed this happens during menu mode, fast typing, etc.)
+                    var messageKey = $"{keyName}_DOWN";
+                    if (_lastHookMessage.ContainsKey(messageKey) && 
+                        (now - _lastHookMessage[messageKey]) < _duplicateWindow)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook: Duplicate DOWN message for {keyName}, ignoring");
+                        return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
+                    }
+                    
+                    _lastHookMessage[messageKey] = now;
                     
                     System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook: Key DOWN detected: {key} (VK: {hookStruct.vkCode})");
                     
@@ -108,6 +127,19 @@ namespace AidehMacros.Services
                 {
                     var hookStruct = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
                     var key = KeyInterop.KeyFromVirtualKey((int)hookStruct.vkCode);
+                    var keyName = key.ToString();
+                    var now = DateTime.Now;
+                    
+                    // Check for duplicate UP messages
+                    var messageKey = $"{keyName}_UP";
+                    if (_lastHookMessage.ContainsKey(messageKey) && 
+                        (now - _lastHookMessage[messageKey]) < _duplicateWindow)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook: Duplicate UP message for {keyName}, ignoring");
+                        return CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
+                    }
+                    
+                    _lastHookMessage[messageKey] = now;
                     
                     System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook: Key UP detected: {key} (VK: {hookStruct.vkCode})");
                     
@@ -122,6 +154,17 @@ namespace AidehMacros.Services
                     };
                     
                     _instance?.KeyUp?.Invoke(_instance, args);
+                }
+                
+                // Clean up old message tracking entries periodically
+                if (_lastHookMessage.Count > 20)
+                {
+                    var cutoff = DateTime.Now - _duplicateWindow;
+                    var keysToRemove = _lastHookMessage.Where(kvp => kvp.Value < cutoff).Select(kvp => kvp.Key).ToList();
+                    foreach (var key in keysToRemove)
+                    {
+                        _lastHookMessage.Remove(key);
+                    }
                 }
             }
             
