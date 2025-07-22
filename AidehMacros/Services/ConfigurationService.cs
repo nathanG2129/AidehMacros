@@ -66,18 +66,23 @@ namespace AidehMacros.Services
         
         public void AddOrUpdateAction(Configuration config, MacroAction action)
         {
+            System.Diagnostics.Debug.WriteLine($"ConfigurationService.AddOrUpdateAction: Adding/updating action '{action.Name}' with ID '{action.Id}'");
+            
             var existing = config.Actions.FirstOrDefault(a => a.Id == action.Id);
             if (existing != null)
             {
+                System.Diagnostics.Debug.WriteLine($"ConfigurationService.AddOrUpdateAction: Updating existing action");
                 var index = config.Actions.IndexOf(existing);
                 config.Actions[index] = action;
             }
             else
             {
+                System.Diagnostics.Debug.WriteLine($"ConfigurationService.AddOrUpdateAction: Adding new action");
                 config.Actions.Add(action);
             }
             
             SaveConfiguration(config);
+            System.Diagnostics.Debug.WriteLine($"ConfigurationService.AddOrUpdateAction: Action saved. Total actions: {config.Actions.Count}");
         }
         
         public void RemoveAction(Configuration config, string actionId)
@@ -100,21 +105,36 @@ namespace AidehMacros.Services
         
         public void AddOrUpdateMapping(Configuration config, MacroMapping mapping)
         {
+            System.Diagnostics.Debug.WriteLine($"ConfigurationService.AddOrUpdateMapping: Adding/updating mapping for key '{mapping.TriggerKey}' with ActionId '{mapping.ActionId}'");
+            
             var existing = config.Mappings.FirstOrDefault(m => m.Id == mapping.Id);
             if (existing != null)
             {
+                System.Diagnostics.Debug.WriteLine($"ConfigurationService.AddOrUpdateMapping: Updating existing mapping");
                 var index = config.Mappings.IndexOf(existing);
                 config.Mappings[index] = mapping;
             }
             else
             {
+                System.Diagnostics.Debug.WriteLine($"ConfigurationService.AddOrUpdateMapping: Adding new mapping");
                 config.Mappings.Add(mapping);
             }
             
             // Update the action reference
-            mapping.Action = config.Actions.FirstOrDefault(a => a.Id == mapping.ActionId);
+            var action = config.Actions.FirstOrDefault(a => a.Id == mapping.ActionId);
+            mapping.Action = action;
+            
+            if (action != null)
+            {
+                System.Diagnostics.Debug.WriteLine($"ConfigurationService.AddOrUpdateMapping: Linked action '{action.Name}' to mapping");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"ConfigurationService.AddOrUpdateMapping: WARNING - No action found with ID '{mapping.ActionId}'");
+            }
             
             SaveConfiguration(config);
+            System.Diagnostics.Debug.WriteLine($"ConfigurationService.AddOrUpdateMapping: Configuration saved");
         }
         
         public void RemoveMapping(Configuration config, string mappingId)

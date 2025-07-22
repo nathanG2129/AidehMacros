@@ -128,7 +128,17 @@ namespace AidehMacros
                 if (KeyboardVisualControl != null)
                 {
                     KeyboardVisualControl.SetConfiguration(_currentConfig, _configService);
+                    
+                    // Subscribe to the KeyAssignmentRequested event (only once!)
+                    KeyboardVisualControl.KeyAssignmentRequested -= KeyboardVisual_KeyAssignmentRequested; // Remove any existing subscription
                     KeyboardVisualControl.KeyAssignmentRequested += KeyboardVisual_KeyAssignmentRequested;
+                    System.Diagnostics.Debug.WriteLine("MainWindow.InitializeApplication: Subscribed to KeyAssignmentRequested event");
+                }
+                
+                // Subscribe to tab selection changes to refresh visuals when Keyboard Layout tab is selected
+                if (MainTabControl != null)
+                {
+                    MainTabControl.SelectionChanged += MainTabControl_SelectionChanged;
                 }
                 
                 // Update keyboard visual and stats (now that KeyboardVisualControl is configured)
@@ -479,12 +489,20 @@ namespace AidehMacros
         
         private void KeyboardVisual_KeyAssignmentRequested(object? sender, KeyAssignmentEventArgs e)
         {
-            var dialog = new KeyAssignmentDialog(e.KeyName, e.ExistingMapping);
+            System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Opening dialog for key '{e.KeyName}'");
             
-            if (dialog.ShowDialog() == true)
+            var dialog = new KeyAssignmentDialog(e.KeyName, e.ExistingMapping);
+            var dialogResult = dialog.ShowDialog();
+            
+            System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Dialog result: {dialogResult}");
+            
+            if (dialogResult == true)
             {
+                System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Dialog completed successfully");
+                
                 if (dialog.ShouldRemove && e.ExistingMapping != null)
                 {
+                    System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Removing assignment from key '{e.KeyName}'");
                     // Remove existing assignment
                     _configService.RemoveAction(_currentConfig, e.ExistingMapping.ActionId);
                     _configService.RemoveMapping(_currentConfig, e.ExistingMapping.Id);
@@ -492,20 +510,50 @@ namespace AidehMacros
                 }
                 else if (dialog.ResultAction != null && dialog.ResultMapping != null)
                 {
-                    // Add or update assignment
+                    System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Adding/updating assignment for key '{e.KeyName}' with action '{dialog.ResultAction.Name}' (ActionId: {dialog.ResultAction.Id})");
+                    
+                    // Add or update assignment - do this FIRST before linking
                     _configService.AddOrUpdateAction(_currentConfig, dialog.ResultAction);
                     _configService.AddOrUpdateMapping(_currentConfig, dialog.ResultMapping);
                     
-                    // Link the action to the mapping
-                    dialog.ResultMapping.Action = dialog.ResultAction;
-                    dialog.ResultMapping.KeyboardDeviceId = _currentConfig.MacroKeyboardDeviceId;
+                    // Now ensure the action reference is properly linked in the mapping
+                    var savedMapping = _currentConfig.Mappings.FirstOrDefault(m => m.Id == dialog.ResultMapping.Id);
+                    if (savedMapping != null)
+                    {
+                        savedMapping.Action = dialog.ResultAction;
+                        savedMapping.KeyboardDeviceId = _currentConfig.MacroKeyboardDeviceId ?? "";
+                        System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Linked action '{dialog.ResultAction.Name}' to mapping for key '{e.KeyName}'");
+                    }
+                    
+                    // Re-link ALL action references to ensure consistency
+                    foreach (var mapping in _currentConfig.Mappings)
+                    {
+                        var action = _currentConfig.Actions.FirstOrDefault(a => a.Id == mapping.ActionId);
+                        mapping.Action = action;
+                        if (action != null)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Linked action '{action.Name}' to mapping for key '{mapping.TriggerKey}'");
+                        }
+                    }
+                    
+                    // Save the configuration again to ensure everything is persisted
+                    _configService.SaveConfiguration(_currentConfig);
+                    
+                    System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Configuration saved. Total actions: {_currentConfig.Actions.Count}, Total mappings: {_currentConfig.Mappings.Count}");
                     
                     UpdateStatus($"Assigned {dialog.ResultAction.Name} to {e.KeyName} key");
                 }
                 
                 // Refresh the visual keyboard and stats
+                System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Refreshing keyboard visual and stats");
                 KeyboardVisualControl.SetConfiguration(_currentConfig, _configService);
                 UpdateKeyboardStats();
+                
+                System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Assignment process complete");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"MainWindow.KeyAssignmentRequested: Dialog was cancelled or failed");
             }
         }
         
@@ -552,6 +600,30 @@ namespace AidehMacros
             // TODO: Implement import functionality
             System.Windows.MessageBox.Show("Import functionality coming soon!", "Feature Preview", 
                 System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+        }
+        
+        private void MainTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (sender is System.Windows.Controls.TabControl tabControl && tabControl.SelectedItem is System.Windows.Controls.TabItem selectedTab)
+            {
+                System.Diagnostics.Debug.WriteLine($"MainWindow.MainTabControl_SelectionChanged: Selected tab: {selectedTab.Header}");
+                
+                // If the Keyboard Layout tab is selected, refresh the visuals and stats
+                if (selectedTab.Header?.ToString() == "Keyboard Layout")
+                {
+                    System.Diagnostics.Debug.WriteLine("MainWindow.MainTabControl_SelectionChanged: Keyboard Layout tab selected, refreshing");
+                    
+                    // Small delay to ensure the UI is fully loaded
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (KeyboardVisualControl != null && _currentConfig != null)
+                        {
+                            KeyboardVisualControl.SetConfiguration(_currentConfig, _configService);
+                        }
+                        UpdateKeyboardStats();
+                    }), System.Windows.Threading.DispatcherPriority.Loaded);
+                }
+            }
         }
         
         protected override void OnClosed(EventArgs e)

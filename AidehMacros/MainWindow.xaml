@@ -133,8 +133,7 @@
                     <!-- Keyboard Visual -->
                     <Border Grid.Row="1" Background="White" BorderBrush="#E0E0E0" BorderThickness="1" 
                             CornerRadius="8" Padding="10">
-                        <controls:KeyboardVisual x:Name="KeyboardVisualControl" 
-                                               KeyAssignmentRequested="KeyboardVisual_KeyAssignmentRequested"/>
+                        <controls:KeyboardVisual x:Name="KeyboardVisualControl"/>
                     </Border>
                     
                     <!-- Quick Stats -->
