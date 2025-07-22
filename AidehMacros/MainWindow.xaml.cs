@@ -16,14 +16,16 @@ namespace AidehMacros
     {
         private readonly ConfigurationService _configService = null!;
         private readonly MacroExecutionService _executionService = null!;
-        private readonly LowLevelKeyboardHook _keyboardHook = null!;
-        private readonly RawInputKeyboardHook _rawInputHook = null!; // Keep for detection mode
+        private readonly RawInputKeyboardHook _rawInputHook = null!; // Primary hook for both detection and blocking
         
         private Configuration _currentConfig = null!;
         private string? _detectedKeyboardId = null;
         private ObservableCollection<MacroAction> _actions = null!;
         private ObservableCollection<MacroMapping> _mappings = null!;
         private System.Threading.CancellationTokenSource? _testDisplayResetToken;
+        
+        // Device correlation tracking
+        private readonly HashSet<string> _mappedKeys = new(); // Keys that should be blocked
         
         public MainWindow()
         {
@@ -42,10 +44,6 @@ namespace AidehMacros
                 System.Diagnostics.Debug.WriteLine("About to create MacroExecutionService...");
                 _executionService = new MacroExecutionService();
                 System.Diagnostics.Debug.WriteLine("MacroExecutionService created");
-                
-                System.Diagnostics.Debug.WriteLine("About to create LowLevelKeyboardHook...");
-                _keyboardHook = new LowLevelKeyboardHook();
-                System.Diagnostics.Debug.WriteLine("LowLevelKeyboardHook created");
                 
                 System.Diagnostics.Debug.WriteLine("About to create RawInputKeyboardHook...");
                 _rawInputHook = new RawInputKeyboardHook();
@@ -91,7 +89,8 @@ namespace AidehMacros
                 if (!string.IsNullOrEmpty(_detectedKeyboardId))
                 {
                     _rawInputHook.SetTargetDevice(_detectedKeyboardId);
-                    System.Diagnostics.Debug.WriteLine($"MainWindow: Set raw input target device to {_detectedKeyboardId}");
+                    _rawInputHook.SetInputBlocking(true); // Enable input blocking for mapped keys
+                    System.Diagnostics.Debug.WriteLine($"MainWindow: Set raw input target device to {_detectedKeyboardId} with input blocking enabled");
                 }
                 
                 System.Diagnostics.Debug.WriteLine("MainWindow: Raw Input keyboard hook started successfully");
@@ -100,12 +99,6 @@ namespace AidehMacros
             {
                 System.Diagnostics.Debug.WriteLine("MainWindow: Failed to start raw input hook");
             }
-            
-            // Initialize the low-level hook for input blocking
-            System.Diagnostics.Debug.WriteLine("MainWindow: Starting low-level keyboard hook for input blocking");
-            _keyboardHook.KeyDown += OnLowLevelKeyDown;
-            _keyboardHook.StartHook();
-            System.Diagnostics.Debug.WriteLine("MainWindow: Low-level keyboard hook started");
             
             UpdateStatus("Keyboard hooks initialized - ready for macro detection and blocking");
         }
@@ -175,10 +168,13 @@ namespace AidehMacros
         private void LoadMappingsFromConfig()
         {
             _mappings.Clear();
+            _mappedKeys.Clear(); // Clear the blocking set
+            
             foreach (var mapping in _currentConfig.Mappings)
             {
                 mapping.Action = _currentConfig.Actions.FirstOrDefault(a => a.Id == mapping.ActionId);
                 _mappings.Add(mapping);
+                _mappedKeys.Add(mapping.TriggerKey); // Add to preemptive blocking set
             }
         }
         
@@ -186,7 +182,6 @@ namespace AidehMacros
         {
             // Temporarily dispose the main window's hooks to avoid conflicts
             _rawInputHook?.Dispose();
-            _keyboardHook?.StopHook();
             System.Diagnostics.Debug.WriteLine("MainWindow.SetupKeyboard: Stopped hooks before detection");
             
             var dialog = new KeyboardDetectionDialog();
@@ -203,16 +198,13 @@ namespace AidehMacros
                 {
                     _rawInputHook.KeyDown += OnRawInputKeyDown;
                     _rawInputHook.SetTargetDevice(_detectedKeyboardId);
-                    System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-initialized raw input hook with target device");
+                    _rawInputHook.SetInputBlocking(true); // Enable input blocking for mapped keys
+                    System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-initialized raw input hook with target device and input blocking enabled");
                 }
                 else
                 {
                     System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Failed to re-initialize raw input hook");
                 }
-                
-                // Re-start the low-level hook
-                _keyboardHook.StartHook();
-                System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-started low-level hook");
                 
                 // Save to configuration
                 _configService.SetMacroKeyboard(_currentConfig, _detectedKeyboardId ?? string.Empty);
@@ -239,12 +231,10 @@ namespace AidehMacros
                     if (!string.IsNullOrEmpty(_detectedKeyboardId))
                     {
                         _rawInputHook.SetTargetDevice(_detectedKeyboardId);
+                        _rawInputHook.SetInputBlocking(true); // Enable input blocking for mapped keys
                     }
                     System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-initialized raw input hook after cancelled detection");
                 }
-                
-                _keyboardHook.StartHook();
-                System.Diagnostics.Debug.WriteLine($"MainWindow.SetupKeyboard: Re-started low-level hook after cancelled detection");
             }
         }
         
@@ -254,90 +244,76 @@ namespace AidehMacros
         {
             System.Diagnostics.Debug.WriteLine($"MainWindow.OnRawInputKeyDown: Key={e.Key}, Device={e.DeviceId}, IsTarget={e.IsFromTargetDevice}");
             
-            // Only process keys from our target keyboard for UI feedback
-            if (!e.IsFromTargetDevice) 
-            {
-                return;
-            }
+            var keyName = e.Key.ToString();
             
-            System.Diagnostics.Debug.WriteLine("MainWindow: Raw input from target device - updating UI");
-            
-            Dispatcher.Invoke(() =>
+            // Only process and potentially block keys from our target macro keyboard
+            if (e.IsFromTargetDevice)
             {
-                // Cancel any pending reset operations
-                _testDisplayResetToken?.Cancel();
-                _testDisplayResetToken = new System.Threading.CancellationTokenSource();
+                if (!_currentConfig.IsEnabled) 
+                {
+                    System.Diagnostics.Debug.WriteLine("MainWindow: Macro system disabled, ignoring key from macro keyboard");
+                    return;
+                }
                 
-                // Update test display with visual feedback
-                var keyName = e.Key.ToString();
-                TestKeyDisplay.Text = $"✅ Key Detected: {keyName} (VK: {e.VirtualKeyCode})";
-                TestKeyDisplay.Background = System.Windows.Media.Brushes.LightGreen;
+                System.Diagnostics.Debug.WriteLine($"MainWindow: Processing key '{keyName}' from macro keyboard");
                 
-                // Check if this key has a mapping
+                // Check if this key has a mapping and execute the action
                 var mapping = _currentConfig.GetMappingForKey(keyName);
                 
                 if (mapping?.Action != null)
                 {
-                    TestKeyDisplay.Text = $"✅ Key Detected: {keyName}\n🎯 Mapped Action: {mapping.Action.Name}";
-                    UpdateStatus($"✅ Key {keyName} detected from macro keyboard → Mapped to: {mapping.Action.Name}");
+                    System.Diagnostics.Debug.WriteLine($"MainWindow: Found mapping for key {keyName}, executing action '{mapping.Action.Name}'");
+                    
+                    // Execute the mapped action immediately
+                    _ = _executionService.ExecuteActionAsync(mapping.Action);
+                    
+                    System.Diagnostics.Debug.WriteLine($"MainWindow: Action '{mapping.Action.Name}' execution started for key {keyName}");
                 }
                 else
                 {
-                    TestKeyDisplay.Text = $"✅ Key Detected: {keyName}\n⚠️ No action mapped to this key";
-                    UpdateStatus($"🔑 Key detected: {keyName} (no mapping configured)");
+                    System.Diagnostics.Debug.WriteLine($"MainWindow: No mapping found for key {keyName}");
                 }
                 
-                // Reset test display after 3 seconds
-                var currentToken = _testDisplayResetToken.Token;
-                Task.Delay(3000, currentToken).ContinueWith(task =>
+                // Update UI
+                Dispatcher.Invoke(() =>
                 {
-                    if (!task.IsCanceled)
+                    // Cancel any pending reset operations
+                    _testDisplayResetToken?.Cancel();
+                    _testDisplayResetToken = new System.Threading.CancellationTokenSource();
+                    
+                    // Update test display with visual feedback
+                    TestKeyDisplay.Text = $"✅ Key Detected: {keyName} (VK: {e.VirtualKeyCode})";
+                    TestKeyDisplay.Background = System.Windows.Media.Brushes.LightGreen;
+                    
+                    if (mapping?.Action != null)
                     {
-                        Dispatcher.Invoke(() =>
-                        {
-                            TestKeyDisplay.Text = "Waiting for key press from your macro keyboard...";
-                            TestKeyDisplay.Background = System.Windows.Media.Brushes.LightBlue;
-                        });
+                        TestKeyDisplay.Text = $"✅ Key Detected: {keyName}\n🎯 Executed Action: {mapping.Action.Name}\n🚫 Input blocked for this device";
+                        UpdateStatus($"🎯 Key {keyName} → Executed: {mapping.Action.Name} (macro keyboard input blocked)");
                     }
-                }, TaskScheduler.Default);
-            });
-        }
-        
-        private void OnLowLevelKeyDown(object? sender, KeyboardHookEventArgs e)
-        {
-            System.Diagnostics.Debug.WriteLine($"MainWindow.OnLowLevelKeyDown: Key={e.Key}, VK={e.VirtualKeyCode}, Enabled={_currentConfig.IsEnabled}");
-            
-            if (!_currentConfig.IsEnabled) 
-            {
-                System.Diagnostics.Debug.WriteLine("MainWindow: Macro system disabled, allowing key through");
-                return;
-            }
-            
-            // Check if this key is from our target device by comparing with recent raw input
-            // For now, we'll check if this key has a mapping (since we can't distinguish devices in low-level hook)
-            var keyName = e.Key.ToString();
-            var mapping = _currentConfig.GetMappingForKey(keyName);
-            
-            if (mapping?.Action != null)
-            {
-                System.Diagnostics.Debug.WriteLine($"MainWindow: Found mapping for key {keyName}, executing action and blocking original input");
-                
-                // Execute the mapped action
-                _ = _executionService.ExecuteActionAsync(mapping.Action);
-                
-                // Block the original key press
-                e.Handled = true;
-                
-                System.Diagnostics.Debug.WriteLine($"MainWindow: Key {keyName} blocked and action '{mapping.Action.Name}' executed");
-                
-                Dispatcher.BeginInvoke(() =>
-                {
-                    UpdateStatus($"🎯 Key {keyName} → Executed: {mapping.Action.Name} (original input blocked)");
+                    else
+                    {
+                        TestKeyDisplay.Text = $"✅ Key Detected: {keyName}\n⚠️ No action mapped to this key";
+                        UpdateStatus($"🔑 Key detected: {keyName} (no mapping configured)");
+                    }
+                    
+                    // Reset test display after 3 seconds
+                    var currentToken = _testDisplayResetToken.Token;
+                    Task.Delay(3000, currentToken).ContinueWith(task =>
+                    {
+                        if (!task.IsCanceled)
+                        {
+                            Dispatcher.Invoke(() =>
+                            {
+                                TestKeyDisplay.Text = "Waiting for key press from your macro keyboard...";
+                                TestKeyDisplay.Background = System.Windows.Media.Brushes.LightBlue;
+                            });
+                        }
+                    }, TaskScheduler.Default);
                 });
             }
             else
             {
-                System.Diagnostics.Debug.WriteLine($"MainWindow: No mapping for key {keyName}, allowing through");
+                System.Diagnostics.Debug.WriteLine($"MainWindow: Key '{keyName}' from non-target device {e.DeviceId}, ignoring");
             }
         }
         
@@ -447,6 +423,7 @@ namespace AidehMacros
                 
                 _mappings.Add(dialog.Result);
                 _configService.AddOrUpdateMapping(_currentConfig, dialog.Result);
+                _mappedKeys.Add(dialog.Result.TriggerKey); // Add to preemptive blocking set
                 UpdateStatus($"Added mapping: {dialog.Result.TriggerKey} → {dialog.Result.Action?.Name}");
             }
         }
@@ -463,6 +440,7 @@ namespace AidehMacros
                     var index = _mappings.IndexOf(selectedMapping);
                     _mappings[index] = dialog.Result;
                     _configService.AddOrUpdateMapping(_currentConfig, dialog.Result);
+                    _mappedKeys.Add(dialog.Result.TriggerKey); // Add to preemptive blocking set
                     UpdateStatus($"Updated mapping: {dialog.Result.TriggerKey} → {dialog.Result.Action?.Name}");
                 }
             }
@@ -482,6 +460,7 @@ namespace AidehMacros
                 {
                     _mappings.Remove(selectedMapping);
                     _configService.RemoveMapping(_currentConfig, selectedMapping.Id);
+                    _mappedKeys.Remove(selectedMapping.TriggerKey); // Remove from preemptive blocking set
                     UpdateStatus($"Deleted mapping: {selectedMapping.TriggerKey}");
                 }
             }
@@ -491,7 +470,6 @@ namespace AidehMacros
         {
             _testDisplayResetToken?.Cancel();
             _testDisplayResetToken?.Dispose();
-            _keyboardHook?.StopHook();
             _rawInputHook?.Dispose();
             base.OnClosed(e);
         }

@@ -14,6 +14,7 @@ namespace AidehMacros.Services
         private const uint RIM_TYPEKEYBOARD = 1;
         private const uint RID_INPUT = 0x10000003;
         private const uint RIDEV_INPUTSINK = 0x00000100;
+        private const uint RIDEV_NOLEGACY = 0x00000030; // Block legacy messages for this device
 
         [StructLayout(LayoutKind.Sequential)]
         private struct RAWINPUTDEVICE
@@ -80,42 +81,71 @@ namespace AidehMacros.Services
         private readonly Dictionary<IntPtr, string> _deviceNames = new();
         private string? _targetDeviceId;
         private bool _isDetectionMode = false;
+        private bool _enableInputBlocking = false;
 
         #endregion
 
         #region Public Methods
 
+        public void SetInputBlocking(bool enabled)
+        {
+            _enableInputBlocking = enabled;
+            System.Diagnostics.Debug.WriteLine($"RawInputKeyboardHook: Input blocking set to {enabled}");
+            
+            // Re-register devices with updated flags if already initialized
+            if (_windowHandle != IntPtr.Zero)
+            {
+                RegisterDevices();
+            }
+        }
+        
+        private void RegisterDevices()
+        {
+            try
+            {
+                uint flags = RIDEV_INPUTSINK;
+                if (_enableInputBlocking)
+                {
+                    flags |= RIDEV_NOLEGACY; // This blocks legacy keyboard messages
+                }
+                
+                var device = new RAWINPUTDEVICE
+                {
+                    usUsagePage = 0x01, // Generic Desktop Controls
+                    usUsage = 0x06,     // Keyboard
+                    dwFlags = flags,
+                    hwndTarget = _windowHandle
+                };
+
+                var devices = new[] { device };
+                bool success = RegisterRawInputDevices(devices, 1, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
+                
+                System.Diagnostics.Debug.WriteLine($"RawInputKeyboardHook: Device registration result: {success}, flags: 0x{flags:X8}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"RawInputKeyboardHook: Error registering devices: {ex.Message}");
+            }
+        }
+        
         public bool Initialize(IntPtr windowHandle)
         {
             try
             {
                 _windowHandle = windowHandle;
                 
-                // Register for raw input from all keyboards
-                var device = new RAWINPUTDEVICE
-                {
-                    usUsagePage = 0x01, // Generic Desktop Controls
-                    usUsage = 0x06,     // Keyboard
-                    dwFlags = RIDEV_INPUTSINK,
-                    hwndTarget = windowHandle
-                };
-
-                var devices = new[] { device };
-                bool success = RegisterRawInputDevices(devices, 1, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
+                RegisterDevices();
                 
-                if (success)
+                // Hook into the window's message processing
+                _hwndSource = HwndSource.FromHwnd(windowHandle);
+                if (_hwndSource != null)
                 {
-                    // Hook into the window's message processing
-                    _hwndSource = HwndSource.FromHwnd(windowHandle);
-                    if (_hwndSource != null)
-                    {
-                        _hwndSource.AddHook(WndProc);
-                        Debug.WriteLine("Raw Input keyboard hook initialized successfully");
-                        return true;
-                    }
+                    _hwndSource.AddHook(WndProc);
+                    Debug.WriteLine("Raw Input keyboard hook initialized successfully");
+                    return true;
                 }
                 
-                Debug.WriteLine($"Failed to initialize Raw Input keyboard hook. Success: {success}");
+                Debug.WriteLine($"Failed to initialize Raw Input keyboard hook");
                 return false;
             }
             catch (Exception ex)

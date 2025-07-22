@@ -42,7 +42,22 @@ namespace AidehMacros.Services
         
         public void StartHook()
         {
+            if (_hookID != IntPtr.Zero)
+            {
+                System.Diagnostics.Debug.WriteLine("LowLevelKeyboardHook: Hook already started, stopping first");
+                StopHook();
+            }
+            
             _hookID = SetHook(_proc);
+            if (_hookID != IntPtr.Zero)
+            {
+                System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook: Hook started successfully with ID {_hookID:X8}");
+            }
+            else
+            {
+                var error = Marshal.GetLastWin32Error();
+                System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook: Failed to start hook, Win32 error: {error}");
+            }
         }
         
         public void StopHook()
@@ -56,12 +71,16 @@ namespace AidehMacros.Services
         
         private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
+            System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook.HookCallback: nCode={nCode}, wParam={wParam:X8}, lParam={lParam:X8}");
+            
             if (nCode >= 0)
             {
                 if (wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN)
                 {
                     var hookStruct = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
                     var key = KeyInterop.KeyFromVirtualKey((int)hookStruct.vkCode);
+                    
+                    System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook: Key DOWN detected: {key} (VK: {hookStruct.vkCode})");
                     
                     var args = new KeyboardHookEventArgs
                     {
@@ -77,13 +96,20 @@ namespace AidehMacros.Services
                     
                     if (args.Handled)
                     {
+                        System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook: Key {key} was HANDLED (blocked)");
                         return (IntPtr)1; // Suppress the key
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook: Key {key} was NOT handled (allowed through)");
                     }
                 }
                 else if (wParam == (IntPtr)WM_KEYUP || wParam == (IntPtr)WM_SYSKEYUP)
                 {
                     var hookStruct = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
                     var key = KeyInterop.KeyFromVirtualKey((int)hookStruct.vkCode);
+                    
+                    System.Diagnostics.Debug.WriteLine($"LowLevelKeyboardHook: Key UP detected: {key} (VK: {hookStruct.vkCode})");
                     
                     var args = new KeyboardHookEventArgs
                     {
