@@ -20,28 +20,41 @@ namespace AidehMacros.Services
         
         public async Task ExecuteActionAsync(MacroAction action)
         {
-            if (!action.IsEnabled) return;
+            if (!action.IsEnabled) 
+            {
+                System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Action '{action.Name}' is disabled, skipping");
+                return;
+            }
+            
+            System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Executing action '{action.Name}' of type {action.Type}");
             
             try
             {
                 switch (action.Type)
                 {
                     case ActionType.KeyCombination:
+                        System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Executing key combination: [{string.Join("+", action.KeyCombination)}]");
                         await ExecuteKeyCombinationAsync(action.KeyCombination);
+                        System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Key combination executed successfully");
                         break;
                         
                     case ActionType.SendText:
+                        System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Sending text: '{action.Data}'");
                         await SendTextAsync(action.Data);
+                        System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Text sent successfully");
                         break;
                         
                     case ActionType.RunCommand:
+                        System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Running command: '{action.Data}'");
                         await RunCommandAsync(action.Data);
+                        System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Command executed successfully");
                         break;
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error executing macro action: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"MacroExecutionService: ERROR executing action '{action.Name}': {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Stack trace: {ex.StackTrace}");
             }
         }
         
@@ -56,21 +69,46 @@ namespace AidehMacros.Services
             {
                 var vk = GetVirtualKeyCode(keyName);
                 if (vk != 0)
+                {
                     virtualKeys.Add(vk);
+                    System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Mapped '{keyName}' to VK {vk:X2}");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"MacroExecutionService: WARNING - Unknown key name '{keyName}'");
+                }
             }
             
-            if (virtualKeys.Count == 0) return;
+            if (virtualKeys.Count == 0) 
+            {
+                System.Diagnostics.Debug.WriteLine($"MacroExecutionService: No valid virtual keys found for combination");
+                return;
+            }
+            
+            System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Executing {virtualKeys.Count} key combination");
+            
+            // Special handling for CTRL+ALT+DEL (Secure Attention Sequence)
+            if (virtualKeys.Contains(0x11) && virtualKeys.Contains(0x12) && virtualKeys.Contains(0x2E))
+            {
+                System.Diagnostics.Debug.WriteLine($"MacroExecutionService: WARNING - CTRL+ALT+DEL detected. This may not work due to Windows security restrictions.");
+                System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Consider using alternative key combinations or running as administrator.");
+            }
             
             // Press all keys down
             foreach (var vk in virtualKeys)
             {
+                System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Pressing down VK {vk:X2}");
                 keybd_event(vk, 0, 0, UIntPtr.Zero);
                 await Task.Delay(10); // Small delay between key presses
             }
             
+            // Small delay to ensure all keys are registered as pressed
+            await Task.Delay(50);
+            
             // Release all keys (in reverse order)
             for (int i = virtualKeys.Count - 1; i >= 0; i--)
             {
+                System.Diagnostics.Debug.WriteLine($"MacroExecutionService: Releasing VK {virtualKeys[i]:X2}");
                 keybd_event(virtualKeys[i], 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                 await Task.Delay(10);
             }
