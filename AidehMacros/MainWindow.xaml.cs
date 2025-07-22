@@ -8,6 +8,8 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using AidehMacros.Models;
 using AidehMacros.Services;
+using AidehMacros.Controls;
+using AidehMacros.Dialogs;
 
 
 namespace AidehMacros
@@ -21,8 +23,6 @@ namespace AidehMacros
         
         private Configuration _currentConfig = null!;
         private string? _detectedKeyboardId = null;
-        private ObservableCollection<MacroAction> _actions = null!;
-        private ObservableCollection<MacroMapping> _mappings = null!;
         private System.Threading.CancellationTokenSource? _testDisplayResetToken;
         
         // Device correlation tracking
@@ -56,10 +56,7 @@ namespace AidehMacros
                 _blockingHook = new LowLevelKeyboardHook();
                 System.Diagnostics.Debug.WriteLine("LowLevelKeyboardHook created");
                 
-                System.Diagnostics.Debug.WriteLine("Creating collections...");
-                _actions = new ObservableCollection<MacroAction>();
-                _mappings = new ObservableCollection<MacroMapping>();
-                System.Diagnostics.Debug.WriteLine("Collections created");
+                System.Diagnostics.Debug.WriteLine("Initializing keyboard visual...");
                 
                 System.Diagnostics.Debug.WriteLine("About to call InitializeApplication");
                 InitializeApplication();
@@ -71,8 +68,6 @@ namespace AidehMacros
                 
                 // Ensure minimum initialization
                 _currentConfig = new Services.Configuration();
-                _actions = new ObservableCollection<MacroAction>();
-                _mappings = new ObservableCollection<MacroMapping>();
                 
                 // Try to show the error to the user
                 System.Windows.MessageBox.Show($"Application failed to initialize properly: {ex.Message}", 
@@ -123,19 +118,21 @@ namespace AidehMacros
                 _currentConfig = _configService.LoadConfiguration();
                 System.Diagnostics.Debug.WriteLine($"Configuration loaded: {_currentConfig != null}");
             
-                // Setup data bindings
-                ActionsListView.ItemsSource = _actions;
-                MappingsListView.ItemsSource = _mappings;
-                
-                // Load data from config
-                LoadActionsFromConfig();
-                LoadMappingsFromConfig();
-                
                 // Load the detected keyboard from config
                 _detectedKeyboardId = _currentConfig?.MacroKeyboardDeviceId;
                 
                 // Set initial state
                 EnabledToggle.IsChecked = _currentConfig?.IsEnabled ?? true;
+                
+                // Initialize keyboard visual BEFORE calling UpdateKeyboardStats
+                if (KeyboardVisualControl != null)
+                {
+                    KeyboardVisualControl.SetConfiguration(_currentConfig, _configService);
+                    KeyboardVisualControl.KeyAssignmentRequested += KeyboardVisual_KeyAssignmentRequested;
+                }
+                
+                // Update keyboard visual and stats (now that KeyboardVisualControl is configured)
+                UpdateKeyboardStats();
                 
                 // Update UI based on whether we have a keyboard configured
                 if (string.IsNullOrEmpty(_detectedKeyboardId))
@@ -168,25 +165,41 @@ namespace AidehMacros
             }
         }
         
-        private void LoadActionsFromConfig()
+        private void UpdateKeyboardStats()
         {
-            _actions.Clear();
-            foreach (var action in _currentConfig.Actions)
-            {
-                _actions.Add(action);
-            }
-        }
-        
-        private void LoadMappingsFromConfig()
-        {
-            _mappings.Clear();
-            _mappedKeys.Clear(); // Clear the blocking set
+            var assignedCount = KeyboardVisualControl?.GetAssignedKeyCount() ?? 0;
             
-            foreach (var mapping in _currentConfig.Mappings)
+            // Only update UI if elements are available (tab is loaded)
+            if (AssignedKeyCountText != null)
             {
-                mapping.Action = _currentConfig.Actions.FirstOrDefault(a => a.Id == mapping.ActionId);
-                _mappings.Add(mapping);
-                _mappedKeys.Add(mapping.TriggerKey); // Add to preemptive blocking set
+                AssignedKeyCountText.Text = assignedCount.ToString();
+            }
+            
+            // Update blocking set for the hooks
+            _mappedKeys.Clear();
+            if (_currentConfig?.Mappings != null)
+            {
+                foreach (var mapping in _currentConfig.Mappings.Where(m => m.IsEnabled))
+                {
+                    _mappedKeys.Add(mapping.TriggerKey);
+                }
+            }
+            
+            // Update tips based on progress (only if UI element exists)
+            if (QuickTipText != null)
+            {
+                if (assignedCount == 0)
+                {
+                    QuickTipText.Text = "Get started by clicking on any key to assign your first macro!";
+                }
+                else if (assignedCount < 5)
+                {
+                    QuickTipText.Text = "Great start! Try assigning more keys for a complete streaming setup.";
+                }
+                else
+                {
+                    QuickTipText.Text = $"Awesome! You have {assignedCount} macro keys set up for maximum productivity!";
+                }
             }
         }
         
@@ -267,9 +280,9 @@ namespace AidehMacros
             // Only process and potentially block keys from our target macro keyboard
             if (e.IsFromTargetDevice)
             {
-                if (!_currentConfig.IsEnabled) 
+                if (_currentConfig == null || !_currentConfig.IsEnabled) 
                 {
-                    System.Diagnostics.Debug.WriteLine("MainWindow: Macro system disabled, ignoring key from macro keyboard");
+                    System.Diagnostics.Debug.WriteLine("MainWindow: Macro system disabled or not configured, ignoring key from macro keyboard");
                     return;
                 }
                 
@@ -341,11 +354,11 @@ namespace AidehMacros
         
         private async void OnBlockingHookKeyDown(object? sender, KeyboardHookEventArgs e)
         {
-            System.Diagnostics.Debug.WriteLine($"MainWindow.OnBlockingHookKeyDown: Key={e.Key}, VK={e.VirtualKeyCode}, Enabled={_currentConfig.IsEnabled}");
+            System.Diagnostics.Debug.WriteLine($"MainWindow.OnBlockingHookKeyDown: Key={e.Key}, VK={e.VirtualKeyCode}, Enabled={_currentConfig?.IsEnabled ?? false}");
             
-            if (!_currentConfig.IsEnabled) 
+            if (_currentConfig == null || !_currentConfig.IsEnabled) 
             {
-                System.Diagnostics.Debug.WriteLine("MainWindow: Macro system disabled, allowing key through");
+                System.Diagnostics.Debug.WriteLine("MainWindow: Macro system disabled or not configured, allowing key through");
                 return;
             }
             
@@ -395,7 +408,7 @@ namespace AidehMacros
             if (shouldBlock)
             {
                 // Check if this key has a mapping (double-check for safety)
-                var mapping = _currentConfig.GetMappingForKey(keyName);
+                var mapping = _currentConfig?.GetMappingForKey(keyName);
                 
                 if (mapping?.Action != null)
                 {
@@ -464,123 +477,81 @@ namespace AidehMacros
             SetupKeyboard();
         }
         
-        private void ActionsListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void KeyboardVisual_KeyAssignmentRequested(object? sender, KeyAssignmentEventArgs e)
         {
-            var hasSelection = ActionsListView.SelectedItem != null;
-            EditActionButton.IsEnabled = hasSelection;
-            DeleteActionButton.IsEnabled = hasSelection;
-        }
-        
-        private void MappingsListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            var hasSelection = MappingsListView.SelectedItem != null;
-            EditMappingButton.IsEnabled = hasSelection;
-            DeleteMappingButton.IsEnabled = hasSelection;
-        }
-        
-        private void NewAction_Click(object sender, RoutedEventArgs e)
-        {
-            var dialog = new ActionEditDialog();
-            if (dialog.ShowDialog() == true && dialog.Result != null)
+            var dialog = new KeyAssignmentDialog(e.KeyName, e.ExistingMapping);
+            
+            if (dialog.ShowDialog() == true)
             {
-                _actions.Add(dialog.Result);
-                _configService.AddOrUpdateAction(_currentConfig, dialog.Result);
-                UpdateStatus($"Added action: {dialog.Result.Name}");
-            }
-        }
-        
-        private void EditAction_Click(object sender, RoutedEventArgs e)
-        {
-            if (ActionsListView.SelectedItem is MacroAction selectedAction)
-            {
-                var dialog = new ActionEditDialog(selectedAction);
-                if (dialog.ShowDialog() == true && dialog.Result != null)
+                if (dialog.ShouldRemove && e.ExistingMapping != null)
                 {
-                    var index = _actions.IndexOf(selectedAction);
-                    _actions[index] = dialog.Result;
-                    _configService.AddOrUpdateAction(_currentConfig, dialog.Result);
-                    UpdateStatus($"Updated action: {dialog.Result.Name}");
+                    // Remove existing assignment
+                    _configService.RemoveAction(_currentConfig, e.ExistingMapping.ActionId);
+                    _configService.RemoveMapping(_currentConfig, e.ExistingMapping.Id);
+                    UpdateStatus($"Removed assignment from {e.KeyName} key");
                 }
-            }
-        }
-        
-        private void DeleteAction_Click(object sender, RoutedEventArgs e)
-        {
-            if (ActionsListView.SelectedItem is MacroAction selectedAction)
-            {
-                var result = System.Windows.MessageBox.Show(
-                    $"Are you sure you want to delete the action '{selectedAction.Name}'?\nThis will also remove any mappings that use this action.",
-                    "Confirm Delete",
-                    System.Windows.MessageBoxButton.YesNo,
-                    System.Windows.MessageBoxImage.Question);
+                else if (dialog.ResultAction != null && dialog.ResultMapping != null)
+                {
+                    // Add or update assignment
+                    _configService.AddOrUpdateAction(_currentConfig, dialog.ResultAction);
+                    _configService.AddOrUpdateMapping(_currentConfig, dialog.ResultMapping);
+                    
+                    // Link the action to the mapping
+                    dialog.ResultMapping.Action = dialog.ResultAction;
+                    dialog.ResultMapping.KeyboardDeviceId = _currentConfig.MacroKeyboardDeviceId;
+                    
+                    UpdateStatus($"Assigned {dialog.ResultAction.Name} to {e.KeyName} key");
+                }
                 
-                if (result == System.Windows.MessageBoxResult.Yes)
-                {
-                    _actions.Remove(selectedAction);
-                    _configService.RemoveAction(_currentConfig, selectedAction.Id);
-                    LoadMappingsFromConfig(); // Refresh mappings as some may have been removed
-                    UpdateStatus($"Deleted action: {selectedAction.Name}");
-                }
+                // Refresh the visual keyboard and stats
+                KeyboardVisualControl.SetConfiguration(_currentConfig, _configService);
+                UpdateKeyboardStats();
             }
         }
         
-        private void NewMapping_Click(object sender, RoutedEventArgs e)
+        private void ClearAllButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_actions.Count == 0)
+            var assignedCount = KeyboardVisualControl?.GetAssignedKeyCount() ?? 0;
+            if (assignedCount == 0)
             {
-                System.Windows.MessageBox.Show("Please create at least one action before adding mappings.", "No Actions Available", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+                System.Windows.MessageBox.Show("No assignments to clear.", "Info", 
+                    System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
                 return;
             }
             
-            var dialog = new MappingEditDialog(_actions.ToList());
-            if (dialog.ShowDialog() == true && dialog.Result != null)
+            var result = System.Windows.MessageBox.Show(
+                $"Are you sure you want to clear all {assignedCount} key assignments?",
+                "Clear All Assignments",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question);
+            
+            if (result == System.Windows.MessageBoxResult.Yes)
             {
-                dialog.Result.KeyboardDeviceId = _currentConfig.MacroKeyboardDeviceId;
-                dialog.Result.Action = _actions.FirstOrDefault(a => a.Id == dialog.Result.ActionId);
+                // Clear all actions and mappings
+                _currentConfig.Actions.Clear();
+                _currentConfig.Mappings.Clear();
+                _configService.SaveConfiguration(_currentConfig);
                 
-                _mappings.Add(dialog.Result);
-                _configService.AddOrUpdateMapping(_currentConfig, dialog.Result);
-                _mappedKeys.Add(dialog.Result.TriggerKey); // Add to preemptive blocking set
-                UpdateStatus($"Added mapping: {dialog.Result.TriggerKey} → {dialog.Result.Action?.Name}");
+                // Refresh the visual keyboard and stats
+                KeyboardVisualControl.SetConfiguration(_currentConfig, _configService);
+                UpdateKeyboardStats();
+                
+                UpdateStatus("All key assignments cleared");
             }
         }
         
-        private void EditMapping_Click(object sender, RoutedEventArgs e)
+        private void ExportLayoutButton_Click(object sender, RoutedEventArgs e)
         {
-            if (MappingsListView.SelectedItem is MacroMapping selectedMapping)
-            {
-                var dialog = new MappingEditDialog(_actions.ToList(), selectedMapping);
-                if (dialog.ShowDialog() == true && dialog.Result != null)
-                {
-                    dialog.Result.Action = _actions.FirstOrDefault(a => a.Id == dialog.Result.ActionId);
-                    
-                    var index = _mappings.IndexOf(selectedMapping);
-                    _mappings[index] = dialog.Result;
-                    _configService.AddOrUpdateMapping(_currentConfig, dialog.Result);
-                    _mappedKeys.Add(dialog.Result.TriggerKey); // Add to preemptive blocking set
-                    UpdateStatus($"Updated mapping: {dialog.Result.TriggerKey} → {dialog.Result.Action?.Name}");
-                }
-            }
+            // TODO: Implement export functionality
+            System.Windows.MessageBox.Show("Export functionality coming soon!", "Feature Preview", 
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
         }
         
-        private void DeleteMapping_Click(object sender, RoutedEventArgs e)
+        private void ImportLayoutButton_Click(object sender, RoutedEventArgs e)
         {
-            if (MappingsListView.SelectedItem is MacroMapping selectedMapping)
-            {
-                var result = System.Windows.MessageBox.Show(
-                    $"Are you sure you want to delete the mapping '{selectedMapping.TriggerKey} → {selectedMapping.Action?.Name}'?",
-                    "Confirm Delete",
-                    System.Windows.MessageBoxButton.YesNo,
-                    System.Windows.MessageBoxImage.Question);
-                
-                if (result == System.Windows.MessageBoxResult.Yes)
-                {
-                    _mappings.Remove(selectedMapping);
-                    _configService.RemoveMapping(_currentConfig, selectedMapping.Id);
-                    _mappedKeys.Remove(selectedMapping.TriggerKey); // Remove from preemptive blocking set
-                    UpdateStatus($"Deleted mapping: {selectedMapping.TriggerKey}");
-                }
-            }
+            // TODO: Implement import functionality
+            System.Windows.MessageBox.Show("Import functionality coming soon!", "Feature Preview", 
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
         }
         
         protected override void OnClosed(EventArgs e)

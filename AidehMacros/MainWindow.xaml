@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:AidehMacros"
+        xmlns:controls="clr-namespace:AidehMacros.Controls"
         mc:Ignorable="d"
         Title="AidehMacros - Magic Remote Control Keyboard" 
         Height="700" Width="1000"
@@ -82,8 +83,8 @@
                 </ScrollViewer>
             </TabItem>
             
-            <!-- Actions Tab -->
-            <TabItem Header="Actions">
+            <!-- Keyboard Layout Tab -->
+            <TabItem Header="Keyboard Layout">
                 <Grid Margin="20">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -91,66 +92,75 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     
-                    <StackPanel Grid.Row="0" Margin="0,0,0,20">
-                        <TextBlock Text="Macro Actions" FontSize="18" FontWeight="SemiBold"/>
-                        <TextBlock Text="Create actions that will be triggered by your macro keyboard keys." 
-                                 Foreground="Gray" TextWrapping="Wrap"/>
-                    </StackPanel>
+                    <!-- Header -->
+                    <Border Grid.Row="0" Background="White" BorderBrush="#E0E0E0" BorderThickness="1" 
+                            CornerRadius="8" Padding="20" Margin="0,0,0,20">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <TextBlock Text="🎹" FontSize="24" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <StackPanel>
+                                    <TextBlock Text="Visual Keyboard Layout" FontSize="20" FontWeight="Bold"/>
+                                    <TextBlock Text="Click on any key below to assign a macro function to it" 
+                                             Foreground="Gray" FontSize="14"/>
+                                </StackPanel>
+                            </StackPanel>
+                            
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                    <Border Background="#4CAF50" Width="20" Height="20" CornerRadius="3" Margin="0,0,8,0"/>
+                                    <TextBlock Text="Green keys have macro assignments" VerticalAlignment="Center" FontSize="12" Foreground="Gray"/>
+                                    <Border Background="#F5F5F5" Width="20" Height="20" CornerRadius="3" Margin="20,0,8,0"/>
+                                    <TextBlock Text="Gray keys are unassigned" VerticalAlignment="Center" FontSize="12" Foreground="Gray"/>
+                                </StackPanel>
+                                
+                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                    <TextBlock Text="Assigned Keys:" VerticalAlignment="Center" FontWeight="Medium" Margin="0,0,8,0"/>
+                                    <TextBlock x:Name="AssignedKeyCountText" Text="0" VerticalAlignment="Center" 
+                                             FontWeight="Bold" Foreground="#4CAF50"/>
+                                    <Button x:Name="ClearAllButton" Content="Clear All" Margin="15,0,0,0" 
+                                            Padding="8,4" Click="ClearAllButton_Click" 
+                                            Background="#F44336" Foreground="White" BorderBrush="#F44336"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                     
-                    <ListView Grid.Row="1" x:Name="ActionsListView" 
-                            SelectionMode="Single" 
-                            SelectionChanged="ActionsListView_SelectionChanged">
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Header="Type" DisplayMemberBinding="{Binding Type}" Width="120"/>
-                                <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="200"/>
-                                <GridViewColumn Header="Data" DisplayMemberBinding="{Binding Data}" Width="300"/>
-                                <GridViewColumn Header="Enabled" DisplayMemberBinding="{Binding IsEnabled}" Width="80"/>
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
+                    <!-- Keyboard Visual -->
+                    <Border Grid.Row="1" Background="White" BorderBrush="#E0E0E0" BorderThickness="1" 
+                            CornerRadius="8" Padding="10">
+                        <controls:KeyboardVisual x:Name="KeyboardVisualControl" 
+                                               KeyAssignmentRequested="KeyboardVisual_KeyAssignmentRequested"/>
+                    </Border>
                     
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-                        <Button Content="New Action" Click="NewAction_Click" Margin="0,0,10,0"/>
-                        <Button Content="Edit" Click="EditAction_Click" IsEnabled="False" x:Name="EditActionButton" Margin="0,0,10,0"/>
-                        <Button Content="Delete" Click="DeleteAction_Click" IsEnabled="False" x:Name="DeleteActionButton"/>
-                    </StackPanel>
-                </Grid>
-            </TabItem>
-            
-            <!-- Mappings Tab -->
-            <TabItem Header="Mappings">
-                <Grid Margin="20">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-                    
-                    <StackPanel Grid.Row="0" Margin="0,0,0,20">
-                        <TextBlock Text="Key Mappings" FontSize="18" FontWeight="SemiBold"/>
-                        <TextBlock Text="Map keys on your macro keyboard to specific actions." 
-                                 Foreground="Gray" TextWrapping="Wrap"/>
-                    </StackPanel>
-                    
-                    <ListView Grid.Row="1" x:Name="MappingsListView" 
-                            SelectionMode="Single" 
-                            SelectionChanged="MappingsListView_SelectionChanged">
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Header="Key" DisplayMemberBinding="{Binding TriggerKey}" Width="100"/>
-                                <GridViewColumn Header="Action" DisplayMemberBinding="{Binding Action.Name}" Width="200"/>
-                                <GridViewColumn Header="Details" DisplayMemberBinding="{Binding Action.Data}" Width="300"/>
-                                <GridViewColumn Header="Enabled" DisplayMemberBinding="{Binding IsEnabled}" Width="80"/>
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
-                    
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-                        <Button Content="New Mapping" Click="NewMapping_Click" Margin="0,0,10,0"/>
-                        <Button Content="Edit" Click="EditMapping_Click" IsEnabled="False" x:Name="EditMappingButton" Margin="0,0,10,0"/>
-                        <Button Content="Delete" Click="DeleteMapping_Click" IsEnabled="False" x:Name="DeleteMappingButton"/>
-                    </StackPanel>
+                    <!-- Quick Stats -->
+                    <Border Grid.Row="2" Background="#F8F9FA" BorderBrush="#E0E0E0" BorderThickness="1" 
+                            CornerRadius="8" Padding="15" Margin="0,10,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            
+                            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                <TextBlock Text="💡" FontSize="16" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBlock x:Name="QuickTipText" 
+                                         Text="Tip: Start by assigning common shortcuts like F1-F12 keys for easy streaming control!" 
+                                         VerticalAlignment="Center" FontStyle="Italic" Foreground="#666"/>
+                            </StackPanel>
+                            
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <Button Content="📋 Export Layout" Margin="0,0,10,0" Padding="8,4" 
+                                        Click="ExportLayoutButton_Click"/>
+                                <Button Content="📁 Import Layout" Padding="8,4" 
+                                        Click="ImportLayoutButton_Click"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
                 </Grid>
             </TabItem>
             
